@@ -10,6 +10,10 @@ Codex 通道使用官方 Codex App Server 协议：
 4. 投递时依次调用 `thread/resume` 和 `turn/start`，在原任务中继续执行。
 5. `turn/*` 与 `item/*` 通知用于同步状态和回复。
 
+WorkBuddy 与 Codex 的技术选型、总体架构和生产化设计见：
+
+- [WorkBuddy 与 Codex 原会话任务注入方案设计](docs/SOLUTION-DESIGN.md)
+
 ## 本地运行
 
 终端一：
