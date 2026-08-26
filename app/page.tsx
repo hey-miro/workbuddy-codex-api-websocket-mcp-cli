@@ -12,12 +12,21 @@ type Task = {
   priority: string;
   status: TaskStatus;
   createdAt: string;
+  sessionId: string;
+  sessionAlias: string;
+  reuseSession: boolean;
 };
 
+const sessions = [
+  { id: "wb-session-project-a", alias: "项目监控会话", state: "在线", tone: "online" },
+  { id: "wb-session-mail-agent", alias: "邮件处理会话", state: "忙碌", tone: "busy" },
+  { id: "wb-session-daily", alias: "日常任务会话", state: "在线", tone: "online" },
+];
+
 const seedTasks: Task[] = [
-  { id: "WB-1042", externalId: "monitor-0826-03", capability: "notification_send", title: "项目风险提醒", body: "支付服务错误率在 10 分钟内超过阈值。", priority: "high", status: "completed", createdAt: "10:42" },
-  { id: "WB-1041", externalId: "mail-0826-18", capability: "send_message", title: "客户邮件需要处理", body: "请分析邮件并生成回复建议。", priority: "normal", status: "running", createdAt: "10:38" },
-  { id: "WB-1040", externalId: "cron-0826-07", capability: "notification_send", title: "日报已生成", body: "今天的团队日报已整理完成。", priority: "low", status: "completed", createdAt: "10:31" },
+  { id: "WB-1042", externalId: "monitor-0826-03", capability: "conversation_send", title: "项目风险提醒", body: "支付服务错误率在 10 分钟内超过阈值。", priority: "high", status: "completed", createdAt: "10:42", sessionId: sessions[0].id, sessionAlias: sessions[0].alias, reuseSession: true },
+  { id: "WB-1041", externalId: "mail-0826-18", capability: "conversation_send", title: "客户邮件需要处理", body: "请分析邮件并生成回复建议。", priority: "normal", status: "running", createdAt: "10:38", sessionId: sessions[1].id, sessionAlias: sessions[1].alias, reuseSession: true },
+  { id: "WB-1040", externalId: "cron-0826-07", capability: "conversation_send", title: "日报已生成", body: "今天的团队日报已整理完成。", priority: "low", status: "completed", createdAt: "10:31", sessionId: sessions[2].id, sessionAlias: sessions[2].alias, reuseSession: true },
 ];
 
 const statusLabel: Record<TaskStatus, string> = {
@@ -36,7 +45,15 @@ export default function Home() {
   useEffect(() => {
     const stored = window.localStorage.getItem("workbuddy-demo-tasks");
     if (stored) {
-      try { setTasks(JSON.parse(stored)); } catch { /* keep demo data */ }
+      try {
+        const restored = JSON.parse(stored) as Task[];
+        setTasks(restored.map((task) => ({
+          ...task,
+          sessionId: task.sessionId || sessions[0].id,
+          sessionAlias: task.sessionAlias || sessions[0].alias,
+          reuseSession: task.reuseSession ?? true,
+        })));
+      } catch { /* keep demo data */ }
     }
   }, []);
 
@@ -59,6 +76,13 @@ export default function Home() {
       return;
     }
     const now = new Date();
+    const sessionId = String(data.get("sessionId"));
+    const targetSession = sessions.find((session) => session.id === sessionId);
+    const reuseSession = data.get("reuseSession") === "on";
+    if (reuseSession && !targetSession) {
+      setNotice("投递失败：要求复用的原会话不存在，未自动新建会话");
+      return;
+    }
     const task: Task = {
       id: `WB-${1040 + tasks.length + 1}`,
       externalId,
@@ -68,21 +92,24 @@ export default function Home() {
       priority: String(data.get("priority")),
       status: "queued",
       createdAt: now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }),
+      sessionId,
+      sessionAlias: targetSession?.alias || "未绑定会话",
+      reuseSession,
     };
     setTasks((current) => [task, ...current]);
     setSelected(task);
-    setNotice(`任务 ${task.id} 已进入队列`);
-    event.currentTarget.reset();
+    const isBusy = targetSession?.tone === "busy";
+    setNotice(isBusy ? `${targetSession.alias}当前忙碌，任务已进入该会话专属队列` : `任务 ${task.id} 已投递到原会话：${task.sessionAlias}`);
     window.setTimeout(() => {
       setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "running" } : item));
       setSelected((current) => current?.id === task.id ? { ...current, status: "running" } : current);
-      setNotice(`WorkBuddy 正在执行 ${task.capability}`);
-    }, 700);
+      setNotice(`已唤醒 ${task.sessionAlias}，WorkBuddy 正在原会话中继续执行`);
+    }, isBusy ? 1600 : 700);
     window.setTimeout(() => {
       setTasks((current) => current.map((item) => item.id === task.id ? { ...item, status: "completed" } : item));
       setSelected((current) => current?.id === task.id ? { ...current, status: "completed" } : current);
-      setNotice(`任务 ${task.id} 执行完成，结果已保存`);
-    }, 2200);
+      setNotice(`任务 ${task.id} 已在 ${task.sessionAlias} 中执行完成`);
+    }, isBusy ? 3400 : 2200);
   }
 
   return (
@@ -116,7 +143,12 @@ export default function Home() {
         <section className="stats">
           <article><span>今日任务</span><strong>{counts.total}</strong><small>本机持久化</small></article>
           <article><span>正在处理</span><strong>{counts.active}</strong><small className="amber">队列工作正常</small></article>
-          <article><span>执行成功</span><strong>{counts.done}</strong><small className="green">幂等保护已启用</small></article>
+          <article><span>已绑定会话</span><strong>{sessions.length}</strong><small className="green">原会话续接已启用</small></article>
+        </section>
+
+        <section className="session-strip">
+          <div className="session-strip-title"><span className="eyebrow">SESSION ROUTING</span><strong>会话路由</strong></div>
+          {sessions.map((session) => <div className="session-chip" key={session.id}><span className={session.tone} /><div><strong>{session.alias}</strong><small>{session.id}</small></div><em>{session.state}</em></div>)}
         </section>
 
         <div className="main-grid">
@@ -125,9 +157,11 @@ export default function Home() {
             <form onSubmit={submitTask}>
               <label>外部任务 ID<input name="externalId" required defaultValue={`demo-${Date.now().toString().slice(-5)}`} /></label>
               <div className="field-row">
-                <label>WorkBuddy 能力<select name="capability" defaultValue="notification_send"><option>notification_send</option><option>send_message</option><option>conversation_create</option></select></label>
+                <label>投递方式<select name="capability" defaultValue="conversation_send"><option>conversation_send</option><option>send_message</option><option>notification_send</option></select></label>
                 <label>优先级<select name="priority" defaultValue="normal"><option value="low">低</option><option value="normal">普通</option><option value="high">高</option><option value="urgent">紧急</option></select></label>
               </div>
+              <label>目标原会话<select name="sessionId" defaultValue={sessions[0].id}>{sessions.map((session) => <option key={session.id} value={session.id}>{session.alias} · {session.state}</option>)}</select></label>
+              <label className="switch-row"><span><strong>必须复用原会话</strong><small>找不到目标会话时失败，不自动新建</small></span><input type="checkbox" name="reuseSession" defaultChecked /></label>
               <label>标题<input name="title" required placeholder="例如：发现一个新任务" /></label>
               <label>任务内容<textarea name="body" required rows={4} placeholder="描述希望 WorkBuddy 执行的内容……" /></label>
               <button className="primary" type="submit"><span>▶</span>发送给 WorkBuddy</button>
@@ -140,7 +174,7 @@ export default function Home() {
               {tasks.map((task) => (
                 <button key={task.id} className={`task-row ${selected?.id === task.id ? "selected" : ""}`} onClick={() => setSelected(task)}>
                   <span className={`status-dot ${task.status}`} />
-                  <span className="task-copy"><strong>{task.title}</strong><small>{task.id} · {task.capability}</small></span>
+                  <span className="task-copy"><strong>{task.title}</strong><small>{task.id} · {task.sessionAlias}</small></span>
                   <span className={`badge ${task.status}`}>{statusLabel[task.status]}</span>
                   <time>{task.createdAt}</time>
                 </button>
@@ -151,7 +185,7 @@ export default function Home() {
 
         {selected && <section className="detail-panel">
           <div><span className="eyebrow">SELECTED TASK</span><h3>{selected.title}</h3><p>{selected.body}</p></div>
-          <dl><div><dt>外部 ID</dt><dd>{selected.externalId}</dd></div><div><dt>能力</dt><dd>{selected.capability}</dd></div><div><dt>状态</dt><dd>{statusLabel[selected.status]}</dd></div><div><dt>优先级</dt><dd>{selected.priority}</dd></div></dl>
+          <dl><div><dt>原会话</dt><dd>{selected.sessionAlias}</dd></div><div><dt>Session ID</dt><dd>{selected.sessionId}</dd></div><div><dt>状态</dt><dd>{statusLabel[selected.status]}</dd></div><div><dt>续接策略</dt><dd>{selected.reuseSession ? "必须复用" : "允许新建"}</dd></div></dl>
         </section>}
       </section>
     </main>
