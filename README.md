@@ -1,98 +1,55 @@
-# vinext-starter
+# Desktop Agent Dispatcher
 
-A clean full-stack starter running on
-[vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
-Drizzle support.
+这个 Demo 展示如何从外部系统向 Codex Desktop 或 WorkBuddy 的原会话投递任务。
 
-## Prerequisites
+Codex 通道使用官方 Codex App Server 协议：
 
-- Node.js `>=22.13.0`
+1. 本机 Companion 启动 `codex app-server --stdio`。
+2. 网页通过 `127.0.0.1:5126` 请求本机 Companion。
+3. Companion 使用 `thread/list` 读取桌面任务。
+4. 投递时依次调用 `thread/resume` 和 `turn/start`，在原任务中继续执行。
+5. `turn/*` 与 `item/*` 通知用于同步状态和回复。
 
-## Quick Start
+## 本地运行
+
+终端一：
 
 ```bash
 npm install
+npm run companion
+```
+
+Companion 启动后会显示一个临时 Token。将它复制到网页左下角的“本机 Companion”设置中。
+
+终端二：
+
+```bash
 npm run dev
+```
+
+打开 `http://localhost:3000`。
+
+## 安全边界
+
+- Companion 仅监听 `127.0.0.1`。
+- 列出任务和投递任务都必须携带临时 Token。
+- 默认只允许本地 Demo 和已部署的 Sites 页面跨域访问。
+- Codex 外部任务默认使用 `approvalPolicy: never`。
+- 可选择“只读”或“工作区写入、禁用网络”两种执行模式。
+- 外部任务 ID 在 Companion 生命周期内保持幂等。
+
+可通过环境变量覆盖配置：
+
+```bash
+DISPATCHER_PORT=5126 \
+DISPATCHER_TOKEN="your-local-token" \
+DISPATCHER_ALLOWED_ORIGINS="http://localhost:3000" \
+npm run companion
+```
+
+## 构建
+
+```bash
 npm run build
+npm test
 ```
-
-This starter does not use `wrangler.jsonc`.
-
-## Included Shape
-
-- edit site code under `app/`
-- `.openai/hosting.json` declares optional Sites D1 and R2 bindings
-- `vite.config.ts` simulates declared bindings for local development
-- `db/schema.ts` starts intentionally empty
-- `examples/d1/` contains an optional D1 example surface
-- `drizzle.config.ts` supports local migration generation when needed
-
-## Workspace Auth Headers
-
-OpenAI workspace sites can read the current user's email from
-`oai-authenticated-user-email`.
-
-SIWC-authenticated workspace sites may also receive
-`oai-authenticated-user-full-name` when the user's SIWC profile has a non-empty
-`name` claim. The full-name value is percent-encoded UTF-8 and is accompanied by
-`oai-authenticated-user-full-name-encoding: percent-encoded-utf-8`.
-
-Treat the full name as optional and fall back to email when it is absent:
-
-```tsx
-import { headers } from "next/headers";
-
-export default async function Home() {
-  const requestHeaders = await headers();
-  const email = requestHeaders.get("oai-authenticated-user-email");
-  const encodedFullName = requestHeaders.get("oai-authenticated-user-full-name");
-  const fullName =
-    encodedFullName &&
-    requestHeaders.get("oai-authenticated-user-full-name-encoding") ===
-      "percent-encoded-utf-8"
-      ? decodeURIComponent(encodedFullName)
-      : null;
-
-  const displayName = fullName ?? email;
-  // ...
-}
-```
-
-## Optional Dispatch-Owned ChatGPT Sign-In
-
-Import the ready-to-use helpers from `app/chatgpt-auth.ts` when the site needs
-optional or required ChatGPT sign-in:
-
-- Use `getChatGPTUser()` for optional signed-in UI.
-- Use `requireChatGPTUser(returnTo)` for server-rendered pages that should send
-  anonymous visitors through Sign in with ChatGPT.
-- Use `chatGPTSignInPath(returnTo)` and `chatGPTSignOutPath(returnTo)` for
-  browser links or actions.
-- Pass a same-origin relative `returnTo` path for the destination after sign-in
-  or sign-out. The helper validates and safely encodes it.
-- Mark protected pages with `export const dynamic = "force-dynamic"` because
-  they depend on per-request identity headers.
-
-Dispatch owns `/signin-with-chatgpt`, `/signout-with-chatgpt`, `/callback`, the
-OAuth cookies, and identity header injection. Do not implement app routes for
-those reserved paths. Routes that do not import and call the helper remain
-anonymous-compatible.
-
-SIWC establishes identity only; it does not prove workspace membership. Use the
-Sites hosting platform's access policy controls for workspace-wide restrictions,
-or enforce explicit server-side membership or allowlist checks.
-
-Use SIWC for account pages, user-specific dashboards, saved records, and write
-actions tied to the current ChatGPT user. Leave public content anonymous.
-
-## Useful Commands
-
-- `npm run dev`: start local development
-- `npm run build`: verify the vinext build output
-- `npm test`: build the starter and verify its rendered loading skeleton
-- `npm run db:generate`: generate Drizzle migrations after schema changes
-
-## Learn More
-
-- [vinext Documentation](https://github.com/cloudflare/vinext)
-- [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
